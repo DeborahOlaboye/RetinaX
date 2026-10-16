@@ -455,6 +455,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "clinical_records"
+version = "1.2.2"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "common"
 version = "1.2.2"
 dependencies = [
@@ -2223,6 +2230,7 @@ version = "1.2.2"
 dependencies = [
  "access_control",
  "audit",
+ "clinical_records",
  "common",
  "ed25519-dalek",
  "key_manager",

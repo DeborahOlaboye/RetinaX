@@ -445,89 +445,157 @@ mod tests {
     }
 }
 
+/// Expiration boundary semantics: `is_active()` returns `now < expires_at` and
+/// `get_status_at()` returns `Active` iff `now < expires_at`. Therefore
+/// `now == expires_at` is **expired** (not active). Both entry points agree at
+/// every boundary; the tests below lock that contract in.
 #[cfg(test)]
-mod tests {
+mod expiration_tests {
     use super::*;
 
-    #[test]
-    fn test_consent_manager_grant_and_is_active() {
-        let mut manager = ConsentManager::default();
-        let now = 1_000_000;
-
-        // Grant consent with TTL (expires at now + 3600)
-        manager.grant("c1", "patient_1", "doctor_1", ConsentType::Treatment, now, Some(3600));
-        assert!(manager.is_active("c1", now));
-        assert!(manager.is_active("c1", now + 1800));
-        assert!(!manager.is_active("c1", now + 3600)); // Expired
-
-        // Grant consent without TTL (never expires)
-        manager.grant("c2", "patient_1", "doctor_2", ConsentType::Research, now, None);
-        assert!(manager.is_active("c2", now + 1_000_000));
+    fn active_equals_status(manager: &ConsentManager, id: &str, now: u64) {
+        let is_active = manager.is_active(id, now).unwrap();
+        let status = manager.get_consent_status(id, now).unwrap();
+        assert_eq!(
+            is_active,
+            status == ConsentStatus::Active,
+            "is_active and get_status_at disagree for id={id} at now={now}: {is_active} vs {status:?}"
+        );
     }
 
     #[test]
-    fn test_consent_manager_revoke() {
+    fn exact_expiry_boundary_is_expired() {
         let mut manager = ConsentManager::default();
-        let now = 1_000_000;
+        let now = 1_000_000u64;
+        manager
+            .grant("cst_b", "patient_alice", "dr_bob", ConsentType::Treatment, now, Some(3600))
+            .unwrap();
+        let exp = now + 3600;
 
-        manager.grant("c1", "patient_1", "doctor_1", ConsentType::Sharing, now, None);
-        assert_eq!(manager.get_consent_status("c1", now), ConsentStatus::Active);
+        // Just before expiry: active.
+        assert_eq!(manager.is_active("cst_b", exp - 1), Ok(true));
+        assert_eq!(
+            manager.get_consent_status("cst_b", exp - 1),
+            Ok(ConsentStatus::Active)
+        );
 
-        manager.revoke("c1");
-        assert!(!manager.is_active("c1", now));
-        assert_eq!(manager.get_consent_status("c1", now), ConsentStatus::Revoked);
+        // Exact boundary now == expires_at: expired (documented choice).
+        assert_eq!(manager.is_active("cst_b", exp), Ok(false));
+        assert_eq!(
+            manager.get_consent_status("cst_b", exp),
+            Ok(ConsentStatus::Expired)
+        );
+
+        // Past expiry: expired.
+        assert_eq!(manager.is_active("cst_b", exp + 1), Ok(false));
+        assert_eq!(
+            manager.get_consent_status("cst_b", exp + 1),
+            Ok(ConsentStatus::Expired)
+        );
+
+        // Record-level check agrees too.
+        let record = manager.records.get("cst_b").unwrap();
+        assert_eq!(record.get_status_at(exp - 1), ConsentStatus::Active);
+        assert_eq!(record.get_status_at(exp), ConsentStatus::Expired);
     }
 
     #[test]
-    fn test_consent_manager_get_consent_attribute() {
+    fn grant_and_immediate_expiry_check_in_same_transaction() {
         let mut manager = ConsentManager::default();
-        let now = 1_000_000;
+        let now = 2_000_000u64;
 
-        manager.grant("c1", "patient_1", "doctor_1", ConsentType::Treatment, now, Some(3600));
-        let attr = manager.get_consent_attribute("c1", now).unwrap();
+        // Zero TTL expires immediately: granted_at == expires_at, so even `now`
+        // is already expired.
+        manager
+            .grant("cst_z", "p1", "d1", ConsentType::Treatment, now, Some(0))
+            .unwrap();
+        assert_eq!(manager.is_active("cst_z", now), Ok(false));
+        assert_eq!(
+            manager.get_consent_status("cst_z", now),
+            Ok(ConsentStatus::Expired)
+        );
 
-        assert_eq!(attr.subject, "patient_1");
-        assert_eq!(attr.grantee, "doctor_1");
-        assert_eq!(attr.status, ConsentStatus::Active);
-        assert_eq!(attr.granted_at, now);
-        assert_eq!(attr.expires_at, Some(now + 3600));
-
-        assert!(manager.get_consent_attribute("nonexistent", now).is_none());
+        // No TTL never expires, even far in the future.
+        manager
+            .grant("cst_n", "p1", "d1", ConsentType::Research, now, None)
+            .unwrap();
+        assert_eq!(manager.is_active("cst_n", now), Ok(true));
+        assert_eq!(manager.is_active("cst_n", u64::MAX), Ok(true));
     }
 
     #[test]
-    fn test_consent_manager_get_consent_status() {
+    fn concurrent_checks_during_expiry_window_agree() {
         let mut manager = ConsentManager::default();
-        let now = 1_000_000;
+        let now = 3_000_000u64;
+        manager
+            .grant("cst_c", "p1", "d1", ConsentType::Sharing, now, Some(100))
+            .unwrap();
+        let exp = now + 100;
 
-        manager.grant("c1", "patient_1", "doctor_1", ConsentType::Treatment, now, Some(100));
-        manager.grant("c2", "patient_1", "doctor_2", ConsentType::Research, now, None);
-        manager.grant("c3", "patient_2", "doctor_1", ConsentType::Sharing, now, None);
-        manager.revoke("c3");
-
-        assert_eq!(manager.get_consent_status("c1", now), ConsentStatus::Active);
-        assert_eq!(manager.get_consent_status("c1", now + 200), ConsentStatus::Expired);
-        assert_eq!(manager.get_consent_status("c2", now), ConsentStatus::Active);
-        assert_eq!(manager.get_consent_status("c3", now), ConsentStatus::Revoked);
-        assert_eq!(manager.get_consent_status("c4", now), ConsentStatus::NotGranted);
+        // Simulate many concurrent readers sweeping across the window,
+        // including the exact boundary.
+        for t in [now, now + 1, now + 50, now + 99, exp - 1, exp, exp + 1, exp + 100] {
+            active_equals_status(&manager, "cst_c", t);
+        }
+        // Full sweep around the boundary.
+        for t in (exp - 5)..=(exp + 5) {
+            active_equals_status(&manager, "cst_c", t);
+        }
     }
 
     #[test]
-    fn test_consent_manager_query_active_consents() {
+    fn revoke_while_being_checked_takes_precedence() {
         let mut manager = ConsentManager::default();
-        let now = 1_000_000;
+        let now = 4_000_000u64;
+        manager
+            .grant("cst_r", "p1", "d1", ConsentType::Treatment, now, Some(3600))
+            .unwrap();
 
-        manager.grant("c1", "patient_1", "doctor_1", ConsentType::Treatment, now, None);
-        manager.grant("c2", "patient_1", "doctor_1", ConsentType::Research, now, Some(10)); // Will expire
-        manager.grant("c3", "patient_2", "doctor_1", ConsentType::Sharing, now, None);
-        manager.grant("c4", "patient_1", "doctor_2", ConsentType::Treatment, now, None);
-        manager.revoke("c4"); // Revoked
+        // Active before revoke.
+        assert_eq!(manager.is_active("cst_r", now), Ok(true));
 
-        let active_for_doc1 = manager.get_active_consents_for_grantee("doctor_1", now + 20);
-        assert_eq!(active_for_doc1.len(), 2);
+        // Revoke "while" a check is in flight: revocation wins over expiry.
+        manager.revoke("cst_r").unwrap();
+        assert_eq!(manager.is_active("cst_r", now), Ok(false));
+        assert_eq!(
+            manager.get_consent_status("cst_r", now),
+            Ok(ConsentStatus::Revoked)
+        );
+        // Revoked stays revoked even past expiry.
+        assert_eq!(
+            manager.get_consent_status("cst_r", now + 7200),
+            Ok(ConsentStatus::Revoked)
+        );
+        active_equals_status(&manager, "cst_r", now);
+        active_equals_status(&manager, "cst_r", now + 7200);
+    }
 
-        let active_for_pat1 = manager.get_active_consents_for_subject("patient_1", now + 20);
-        assert_eq!(active_for_pat1.len(), 1);
-        assert_eq!(active_for_pat1[0].grantee, "doctor_1");
+    #[test]
+    fn is_active_and_status_agree_at_all_boundaries() {
+        let mut manager = ConsentManager::default();
+        let now = 5_000_000u64;
+        manager
+            .grant("cst_a", "p1", "d1", ConsentType::Treatment, now, Some(10))
+            .unwrap();
+        manager
+            .grant("cst_p", "p1", "d2", ConsentType::Research, now, None)
+            .unwrap();
+        manager
+            .grant("cst_v", "p2", "d1", ConsentType::Sharing, now, Some(10))
+            .unwrap();
+        manager.revoke("cst_v").unwrap();
+
+        let exp = now + 10;
+        for id in ["cst_a", "cst_p", "cst_v", "missing"] {
+            for t in [now, exp - 1, exp, exp + 1] {
+                active_equals_status(&manager, id, t);
+            }
+        }
+        // Missing id: inactive + NotGranted.
+        assert_eq!(manager.is_active("missing", now), Ok(false));
+        assert_eq!(
+            manager.get_consent_status("missing", now),
+            Ok(ConsentStatus::NotGranted)
+        );
     }
 }

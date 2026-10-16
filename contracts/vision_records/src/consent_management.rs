@@ -83,7 +83,7 @@ pub fn grant_consent(
     let key = consent_key(patient, grantee);
     env.storage().persistent().set(&key, &consent);
 
-    events::publish_consent_granted(env, patient.clone(), grantee.clone(), consent_type, expires_at);
+    events::publish_consent_granted(env, patient.clone(), grantee.clone(), consent_type, now, expires_at, duration_seconds);
 
     Ok(())
 }
@@ -106,7 +106,7 @@ pub fn revoke_consent(
         env.storage().persistent().set(&key, &consent);
     }
 
-    events::publish_consent_revoked(env, patient.clone(), grantee.clone());
+    events::publish_consent_revoked(env, patient.clone(), grantee.clone(), env.ledger().timestamp());
 
     Ok(())
 }
