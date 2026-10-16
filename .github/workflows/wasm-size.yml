@@ -1,0 +1,38 @@
+name: WASM size check
+
+on:
+  pull_request:
+    paths: ["contracts/**", "Cargo.toml", "Cargo.lock", ".github/workflows/wasm-size.yml"]
+  push:
+    branches: [main]
+    paths: ["contracts/**", "Cargo.toml", "Cargo.lock", ".github/workflows/wasm-size.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  wasm-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-unknown-unknown
+      - name: Build and enforce contract size budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          max_bytes=524288
+          packages=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(any(.targets[]; any(.crate_types[]; . == "cdylib"))) | .name')
+          test -n "$packages"
+          for package in $packages; do
+            cargo build -p "$package" --target wasm32-unknown-unknown --release
+            wasm="target/wasm32-unknown-unknown/release/${package//-/_}.wasm"
+            test -f "$wasm"
+            size=$(wc -c < "$wasm")
+            echo "$package: ${size} bytes"
+            if [ "$size" -gt "$max_bytes" ]; then
+              echo "${package} exceeds the 512 KiB WASM budget" >&2
+              exit 1
+            fi
+          done
