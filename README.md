@@ -1,7 +1,7 @@
 # RetinaX - Decentralized Vision Care Records on Stellar
 
 [![Rust](https://img.shields.io/badge/Rust-1.78%2B-orange.svg)](https://www.rust-lang.org/)
-[![Soroban](https://img.shields.io/badge/Soroban-v23.1.4-blue.svg)](https://soroban.stellar.org/)
+[![Soroban SDK](https://img.shields.io/badge/soroban--sdk-25.0.0-blue.svg)](https://soroban.stellar.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/WorldAid/RetinaX/actions/workflows/ci.yml/badge.svg)](https://github.com/WorldAid/RetinaX/actions)
 
@@ -64,7 +64,7 @@ RetinaX transforms vision care record management by leveraging Stellar's blockch
 Before you begin, ensure you have the following installed:
 
 - **Rust 1.78.0+** - [Install Rust](https://www.rust-lang.org/tools/install)
-- **Soroban CLI v23.1.4+** - [Install Soroban](https://soroban.stellar.org/docs/getting-started/installation)
+- **Soroban CLI** - [Install Soroban](https://soroban.stellar.org/docs/getting-started/installation) (contracts target `soroban-sdk` 25.0.0)
 - **Git** - For version control
 - **Make** - For using the provided Makefile (optional but recommended)
 
@@ -96,12 +96,11 @@ The `setup.sh` script handles everything automatically:
 ```
 
 This script will:
-- Install Rust 1.78.0 and required targets
-- Install Soroban CLI v23.1.4
-- Set up project structure
+- Install Rust (if missing), the `wasm32-unknown-unknown` target, and `rustfmt`/`clippy`/`rust-src`
+- Install the Soroban CLI (if missing)
+- Generate a `default` identity
 - Configure Soroban networks (local, testnet, futurenet)
 - Build the project and run tests
-- Generate default identity
 
 #### Option 2: Manual Setup
 
@@ -253,18 +252,31 @@ RetinaX/
 
 ### Basic Contract Interaction
 
+Interacting with the `vision_records` contract from a Soroban test:
+
 ```rust
-// Register a new patient
-let patient_id = client.register_patient(&env, &patient_address, &patient_data);
+// Initialize the contract with an admin
+client.initialize(&admin);
 
-// Add a vision exam record
-let record_id = client.add_exam_record(&env, &patient_id, &exam_data);
+// Register a patient and an optometrist
+client.register_user(&admin, &patient, &Role::Patient, &String::from_str(&env, "Jane Doe"));
+client.register_user(&admin, &optometrist, &Role::Optometrist, &String::from_str(&env, "Dr. Smith"));
 
-// Grant access to an optometrist
-client.grant_access(&env, &patient_id, &optometrist_address, &AccessLevel::Read);
+// Add an exam record (the data hash points to encrypted off-chain data)
+let record_id = client.add_record(
+    &optometrist,
+    &patient,
+    &optometrist,
+    &RecordType::Examination,
+    &String::from_str(&env, "QmHash..."),
+);
 
-// Retrieve vision records
-let records = client.get_patient_records(&env, &patient_id);
+// Patient grants an optometrist read access for 30 days
+client.grant_access(&patient, &patient, &optometrist, &AccessLevel::Read, &(30 * 24 * 60 * 60));
+
+// Retrieve a patient's record IDs and a single record
+let record_ids = client.get_patient_records(&patient);
+let record = client.get_record(&optometrist, &record_id);
 ```
 
 ### Using the Makefile
