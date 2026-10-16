@@ -1412,9 +1412,7 @@ impl VisionRecordsContract {
             retina_imaging,
             fundus_photo,
             clinical_notes,
-        };
-        examination::set_examination(&env, &exam, &caller);
-        Ok(())
+        )
     }
 
     /// Update eye examination details using optimistic concurrency control (OCC).
@@ -2669,7 +2667,14 @@ impl VisionRecordsContract {
         if let Some(clinical_records) = Self::get_clinical_records_contract(env.clone()) {
             let client = clinical_records::ClinicalRecordsContractClient::new(&env, &clinical_records);
             let contract_caller = env.current_contract_address();
-            return client.prepare_add_prescription(&contract_caller, &patient, &provider, &prescription_data);
+            let clinical_data = clinical_records::PrescriptionData {
+                sphere: prescription_data.sphere.clone(),
+                cylinder: prescription_data.cylinder.clone(),
+                axis: prescription_data.axis.clone(),
+                add: prescription_data.add.clone(),
+                pd: prescription_data.pd.clone(),
+            };
+            return Ok(client.prepare_add_prescription(&contract_caller, &patient, &provider, &clinical_data));
         }
 
         // Validate without state changes
@@ -2717,7 +2722,7 @@ impl VisionRecordsContract {
         if let Some(clinical_records) = Self::get_clinical_records_contract(env.clone()) {
             let client = clinical_records::ClinicalRecordsContractClient::new(&env, &clinical_records);
             let contract_caller = env.current_contract_address();
-            return client.commit_add_prescription(&contract_caller, &rx_id);
+            return Ok(client.commit_add_prescription(&contract_caller, &rx_id));
         }
 
         // Retrieve preparation data

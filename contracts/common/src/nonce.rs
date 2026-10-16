@@ -211,4 +211,98 @@ mod tests {
             assert_eq!(CommonError::NonceOverflow as u32, 32);
         });
     }
+
+    /// Submitting the exact same message (same nonce) twice must be rejected
+    /// and must not advance the counter.
+    #[test]
+    fn exact_replay_is_rejected_and_counter_unchanged() {
+        with_contract_env(|env| {
+            let sender = Address::generate(env);
+            validate_and_increment_nonce(env, &sender, 0).unwrap();
+            assert_eq!(current_nonce(env, &sender), 1);
+            // Replay of the exact same nonce.
+            assert_eq!(
+                validate_and_increment_nonce(env, &sender, 0).unwrap_err(),
+                CommonError::InvalidNonce
+            );
+            assert_eq!(current_nonce(env, &sender), 1);
+            // The next fresh nonce still works.
+            validate_and_increment_nonce(env, &sender, 1).unwrap();
+            assert_eq!(current_nonce(env, &sender), 2);
+        });
+    }
+
+    /// Out-of-order delivery (stale or gapped nonces) is rejected; only the
+    /// exact expected nonce advances the stream.
+    #[test]
+    fn out_of_order_delivery_is_rejected() {
+        with_contract_env(|env| {
+            let sender = Address::generate(env);
+            validate_and_increment_nonce(env, &sender, 0).unwrap();
+            validate_and_increment_nonce(env, &sender, 1).unwrap();
+            // Stale: already consumed.
+            assert_eq!(
+                validate_and_increment_nonce(env, &sender, 1).unwrap_err(),
+                CommonError::InvalidNonce
+            );
+            // Future with a gap: not yet expected.
+            assert_eq!(
+                validate_and_increment_nonce(env, &sender, 3).unwrap_err(),
+                CommonError::InvalidNonce
+            );
+            assert_eq!(current_nonce(env, &sender), 2);
+            // In-order delivery resumes cleanly.
+            validate_and_increment_nonce(env, &sender, 2).unwrap();
+            assert_eq!(current_nonce(env, &sender), 3);
+        });
+    }
+
+    /// `u64::MAX` boundary: advancing from `MAX - 1` to `MAX` succeeds, but
+    /// any further increment (`MAX + 1`) returns `NonceOverflow` and leaves
+    /// the counter at `MAX`.
+    #[test]
+    fn nonce_overflow_at_u64_max_is_rejected() {
+        with_contract_env(|env| {
+            let sender = Address::generate(env);
+            store_nonce(env, &sender, u64::MAX - 1);
+            validate_and_increment_nonce(env, &sender, u64::MAX - 1).unwrap();
+            assert_eq!(current_nonce(env, &sender), u64::MAX);
+
+            // Sender-side increment at MAX overflows.
+            assert_eq!(
+                get_and_increment_nonce(env, &sender).unwrap_err(),
+                CommonError::NonceOverflow
+            );
+            // Recipient-side validation at MAX also overflows (no successor).
+            assert_eq!(
+                validate_and_increment_nonce(env, &sender, u64::MAX).unwrap_err(),
+                CommonError::NonceOverflow
+            );
+            assert_eq!(current_nonce(env, &sender), u64::MAX);
+            assert_eq!(CommonError::NonceOverflow as u32, 32);
+        });
+    }
+
+    /// A counter already sitting at `u64::MAX` cannot be incremented from
+    /// either side.
+    #[test]
+    fn nonce_at_max_rejects_both_sides() {
+        with_contract_env(|env| {
+            let sender = Address::generate(env);
+            store_nonce(env, &sender, u64::MAX);
+            assert_eq!(
+                get_and_increment_nonce(env, &sender).unwrap_err(),
+                CommonError::NonceOverflow
+            );
+            assert_eq!(
+                validate_and_increment_nonce(env, &sender, u64::MAX).unwrap_err(),
+                CommonError::NonceOverflow
+            );
+            // A stale nonce at MAX is still InvalidNonce, not overflow.
+            assert_eq!(
+                validate_and_increment_nonce(env, &sender, 0).unwrap_err(),
+                CommonError::InvalidNonce
+            );
+        });
+    }
 }

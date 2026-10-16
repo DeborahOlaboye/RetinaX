@@ -140,7 +140,14 @@ pub fn validate_consent_id(id: &String) -> Result<(), ContractError> {
     validate_consent_string(id, MIN_CONSENT_ID_LEN, MAX_CONSENT_ID_LEN)
 }
 
-pub fn validate_prescription_data(_data: &PrescriptionData) {}
+pub fn validate_prescription_data(data: &PrescriptionData) -> Result<(), ContractError> {
+    validate_string_length(&data.sphere, 1, 16)?;
+    validate_string_length(&data.cylinder, 1, 16)?;
+    validate_string_length(&data.axis, 1, 16)?;
+    validate_string_length(&data.add, 1, 16)?;
+    validate_string_length(&data.pd, 1, 16)?;
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
