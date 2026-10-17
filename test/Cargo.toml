@@ -19,7 +19,12 @@ soroban-sdk = { version = "25.0.0", features = ["testutils"] }
 identity = { path = "../contracts/identity" }
 key_manager = { path = "../contracts/key_manager" }
 vision_records = { path = "../contracts/vision_records" }
+access_control = { path = "../contracts/access_control" }
 
 [[test]]
 name = "cross_contract_integration"
 path = "tests/integration/cross_contract.rs"
+
+[[test]]
+name = "access_control_integration"
+path = "tests/access_control_integration.rs"

@@ -6,11 +6,13 @@ license.workspace = true
 edition.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-autotests = false
-
 [lib]
 crate-type = ["cdylib", "rlib"]
 doctest = false
+
+[[test]]
+name = "clinical_records_test"
+path = "tests/clinical_records_test.rs"
 
 [dependencies]
 soroban-sdk = { workspace = true }

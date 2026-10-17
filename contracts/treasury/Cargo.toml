@@ -11,6 +11,10 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 doctest = false
 
+[[test]]
+name = "treasury_test"
+path = "tests/treasury_test.rs"
+
 [dependencies]
 soroban-sdk = { workspace = true }
 
