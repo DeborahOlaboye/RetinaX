@@ -2,7 +2,7 @@
 
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
-use crate::{EventError, EventStreamContract};
+use events::{EventError, EventStreamContract};
 
 fn setup() -> (Env, Address, Address) {
     let env = Env::default();
@@ -26,7 +26,7 @@ fn test_register_schema_unauthorized() {
     let topic = String::from_str(&env, "test-topic");
     let schema_hash = String::from_str(&env, "hash");
 
-    let result = crate::registry::register_schema(&env, &topic, 1, &schema_hash);
+    let result = events::registry::register_schema(&env, &topic, 1, &schema_hash);
 
     // NOTE: If register_schema is later wrapped with admin enforcement,
     // this test ensures Unauthorized is returned.

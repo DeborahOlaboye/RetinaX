@@ -48,7 +48,7 @@ fn test_initialize_emits_event() {
 
     let all_events = env.events().all();
     assert!(
-        !all_events.is_empty(),
+        !all_events.events().is_empty(),
         "initialize() must emit at least one event"
     );
 }
@@ -62,9 +62,9 @@ fn test_register_schema_emits_event() {
     let topic = String::from_str(&env, "records.vision.create");
     let hash = String::from_str(&env, "sha256:deadbeef");
 
-    let events_before = env.events().all().len();
+    let events_before = env.events().all().events().len();
     client.register_schema(&admin, &topic, &1, &hash);
-    let events_after = env.events().all().len();
+    let events_after = env.events().all().events().len();
 
     assert!(
         events_after > events_before,
@@ -79,10 +79,10 @@ fn test_register_multiple_schema_versions_emits_events() {
     let topic = String::from_str(&env, "records.vision.create");
     let hash = String::from_str(&env, "sha256:v1");
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.register_schema(&admin, &topic, &1, &hash);
     client.register_schema(&admin, &topic, &2, &hash);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert_eq!(
         after - before,
@@ -99,9 +99,9 @@ fn test_register_source_emits_event() {
     let (env, client, admin) = setup();
     let source = Address::generate(&env);
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.register_source(&admin, &source);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after > before,
@@ -120,9 +120,9 @@ fn test_publish_event_emits_event() {
     let topic = String::from_str(&env, "records.vision.create");
     let payload = String::from_str(&env, "payload_hash_1");
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.publish_event(&admin, &topic, &1, &payload);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after > before,
@@ -139,11 +139,11 @@ fn test_multiple_publishes_emit_multiple_events() {
     let topic = String::from_str(&env, "records.vision.create");
     let payload = String::from_str(&env, "p");
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.publish_event(&admin, &topic, &1, &payload);
     client.publish_event(&admin, &topic, &1, &payload);
     client.publish_event(&admin, &topic, &1, &payload);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after - before >= 3,
@@ -163,9 +163,9 @@ fn test_registered_source_publish_emits_event() {
     let topic = String::from_str(&env, "records.vision.create");
     let payload = String::from_str(&env, "source_payload");
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.publish_event(&source, &topic, &1, &payload);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after > before,
@@ -182,9 +182,9 @@ fn test_subscribe_emits_event() {
     let subscriber = Address::generate(&env);
     let pattern = String::from_str(&env, "records.vision.*");
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.subscribe(&subscriber, &pattern);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(after > before, "subscribe() must emit at least one event");
 }
@@ -198,9 +198,9 @@ fn test_unsubscribe_emits_event() {
 
     let sub_id = client.subscribe(&subscriber, &pattern);
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.unsubscribe(&subscriber, &sub_id);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(after > before, "unsubscribe() must emit at least one event");
 }
@@ -219,9 +219,9 @@ fn test_create_consumer_group_emits_event() {
     let mut members = Vec::new(&env);
     members.push_back(m1);
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.create_consumer_group(&owner, &name, &pattern, &members);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after > before,
@@ -239,9 +239,9 @@ fn test_register_webhook_emits_event() {
     let pattern = String::from_str(&env, "records.*");
     let url_hash = String::from_str(&env, "sha256:webhook_url");
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.register_webhook(&owner, &pattern, &url_hash);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after > before,
@@ -259,9 +259,9 @@ fn test_remove_webhook_emits_event() {
 
     let whk_id = client.register_webhook(&owner, &pattern, &url_hash);
 
-    let before = env.events().all().len();
+    let before = env.events().all().events().len();
     client.remove_webhook(&owner, &whk_id);
-    let after = env.events().all().len();
+    let after = env.events().all().events().len();
 
     assert!(
         after > before,
@@ -283,33 +283,33 @@ fn test_full_flow_emits_events_at_each_step() {
     let admin = Address::generate(&env);
 
     // Step 1: initialize
-    let e0 = env.events().all().len();
+    let e0 = env.events().all().events().len();
     client.initialize(&admin);
-    let e1 = env.events().all().len();
+    let e1 = env.events().all().events().len();
     assert!(e1 > e0, "initialize must emit events");
 
     // Step 2: register schema
     let topic = String::from_str(&env, "records.vision.create");
     let hash = String::from_str(&env, "sha256:abc");
     client.register_schema(&admin, &topic, &1, &hash);
-    let e2 = env.events().all().len();
+    let e2 = env.events().all().events().len();
     assert!(e2 > e1, "register_schema must emit events");
 
     // Step 3: publish event
     let payload = String::from_str(&env, "p1");
     client.publish_event(&admin, &topic, &1, &payload);
-    let e3 = env.events().all().len();
+    let e3 = env.events().all().events().len();
     assert!(e3 > e2, "publish_event must emit events");
 
     // Step 4: subscribe
     let subscriber = Address::generate(&env);
     let pattern = String::from_str(&env, "records.vision.*");
     client.subscribe(&subscriber, &pattern);
-    let e4 = env.events().all().len();
+    let e4 = env.events().all().events().len();
     assert!(e4 > e3, "subscribe must emit events");
 
     // Step 5: checkpoint
     client.create_checkpoint(&admin);
-    let e5 = env.events().all().len();
+    let e5 = env.events().all().events().len();
     assert!(e5 > e4, "create_checkpoint must emit events");
 }
