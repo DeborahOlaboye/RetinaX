@@ -2092,6 +2092,7 @@ dependencies = [
 name = "test-framework"
 version = "0.1.0"
 dependencies = [
+ "access_control",
  "common",
  "identity",
  "key_manager",
