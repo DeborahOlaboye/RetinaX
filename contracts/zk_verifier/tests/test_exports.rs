@@ -13,7 +13,10 @@ use zk_verifier::{AccessRequest, ContractError, ZkVerifierContract, ZkVerifierCo
 use zk_verifier::{MerkleVerifier, ZkAccessHelper};
 
 // Test that verifier types are accessible
-use zk_verifier::{Bn254Verifier, PlonkVerifier, PoseidonHasher, Proof, ProofValidationError};
+use zk_verifier::{
+    Bn254Verifier, ExtensibleProof, PlonkVerifier, PoseidonHasher, Proof, ProofSystemId,
+    ProofValidationError,
+};
 
 // Test that vk types are accessible
 use zk_verifier::vk::{G1Point, G2Point};
