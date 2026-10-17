@@ -35,7 +35,10 @@ pub use crate::offchain::{
     OffChainVerificationPayload,
 };
 pub use crate::plonk::PlonkVerifier;
-pub use crate::verifier::{Bn254Verifier, PoseidonHasher, Proof, ProofValidationError, ZkVerifier};
+pub use crate::verifier::{
+    Bn254Verifier, ExtensibleProof, PoseidonHasher, Proof, ProofSystemId,
+    ProofValidationError, ZkVerifier,
+};
 pub use crate::vk::{G1Point, G2Point, VerificationKey};
 
 use common::whitelist;
@@ -122,6 +125,8 @@ pub enum ContractError {
     InvalidAuthLevel = 13,
     /// Public inputs are insufficient for the required authentication level (e.g. Level 4 requires $\ge 2$ inputs).
     ProofRequiredForAuthLevel = 14,
+    /// The requested proof system identifier is invalid, unsupported, or unrecognized.
+    InvalidProofSystem = 15,
 }
 
 /// Maps low-level proof structural validation errors into contract-level [`ContractError`] variants.
@@ -139,6 +144,7 @@ fn map_proof_validation_error(e: ProofValidationError) -> ContractError {
         ProofValidationError::MalformedG2Point => ContractError::MalformedG2Point,
         ProofValidationError::EmptyPublicInputs => ContractError::EmptyPublicInputs,
         ProofValidationError::ZeroedPublicInput => ContractError::ZeroedPublicInput,
+        ProofValidationError::InvalidProofSystemId => ContractError::InvalidProofSystem,
     }
 }
 
