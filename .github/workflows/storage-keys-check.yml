@@ -1,0 +1,27 @@
+name: Storage Key Uniqueness Check
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**/*.rs'
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  check-storage-keys:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run storage key collision check
+        run: |
+          bash scripts/check_storage_keys.sh
+          
+      - name: Report results
+        if: failure()
+        run: |
+          echo "Storage key collision detected! See logs above for details."
+          exit 1
