@@ -2,75 +2,57 @@
 
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
-use events::{EventError, EventStreamContract};
+use events::{EventError, EventStreamContract, EventStreamContractClient};
 
-fn setup() -> (Env, Address, Address) {
+fn setup() -> (Env, EventStreamContractClient<'static>, Address, Address) {
     let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(EventStreamContract, ());
+    let client = EventStreamContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let random_user = Address::generate(&env);
 
-    // Mock auth so require_auth() doesn't fail prematurely
-    env.mock_all_auths();
+    client.initialize(&admin);
 
-    // Initialize contract
-    EventStreamContract::initialize(env.clone(), admin.clone()).unwrap();
-
-    (env, admin, random_user)
+    (env, client, admin, random_user)
 }
 
 #[test]
 fn test_register_schema_unauthorized() {
-    let (env, _admin, random_user) = setup();
+    let (env, client, _admin, _random_user) = setup();
 
     let topic = String::from_str(&env, "test-topic");
     let schema_hash = String::from_str(&env, "hash");
 
-    let result = events::registry::register_schema(&env, &topic, 1, &schema_hash);
+    let result = client.try_register_schema(&_random_user, &topic, &1, &schema_hash);
 
-    // NOTE: If register_schema is later wrapped with admin enforcement,
-    // this test ensures Unauthorized is returned.
-    // Adjust assertion if contract wiring changes.
-    assert!(result.is_ok()); // current behavior (no admin check)
+    // register_schema enforces admin-only access
+    assert_eq!(result, Err(Ok(EventError::Unauthorized)));
 }
 
 #[test]
 fn test_admin_only_function_reverts_for_random_user() {
-    let (env, admin, random_user) = setup();
+    let (env, client, admin, random_user) = setup();
 
-    // Example: simulate calling a function that internally uses require_admin
-    let result = EventStreamContract::get_admin(env.clone());
+    // Admin can read the admin address
+    assert_eq!(client.get_admin(), admin);
 
-    assert_eq!(result.unwrap(), admin);
-
-    // Now simulate a failing admin check manually via internal logic
-    let unauthorized = {
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&soroban_sdk::symbol_short!("ADMIN"))
-            .unwrap();
-
-        if random_user != stored_admin {
-            Err(EventError::Unauthorized)
-        } else {
-            Ok(())
-        }
-    };
-
-    assert_eq!(unauthorized, Err(EventError::Unauthorized));
+    // Non-admin fails the admin check when calling an admin-only function
+    let topic = String::from_str(&env, "admin.topic");
+    let hash = String::from_str(&env, "sha256:admin");
+    assert_eq!(
+        client.try_register_schema(&random_user, &topic, &1, &hash),
+        Err(Ok(EventError::Unauthorized))
+    );
 }
 
 #[test]
 fn test_initialize_twice_fails() {
-    let env = Env::default();
-    env.mock_all_auths();
+    let (env, client, _admin, random_user) = setup();
 
-    let admin = Address::generate(&env);
+    let result = client.try_initialize(&random_user);
 
-    EventStreamContract::initialize(env.clone(), admin.clone()).unwrap();
-
-    let result = EventStreamContract::initialize(env.clone(), admin);
-
-    assert_eq!(result, Err(EventError::AlreadyInitialized));
+    assert_eq!(result, Err(Ok(EventError::AlreadyInitialized)));
 }

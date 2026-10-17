@@ -146,6 +146,14 @@ fn test_dead_letter_queue_end_to_end() {
     let reason = String::from_str(&env, "delivery_failed_network_timeout");
     client.push_dead_letter(&admin, &event_id, &subscriber, &reason);
 
+    // SDK 25: events().all() reflects the most recent invocation only.
+    // push_dead_letter must emit a DLQ_PUSH event.
+    let ev = env.events().all();
+    assert!(
+        ev.events().len() > 0,
+        "push_dead_letter must emit a DLQ_PUSH event"
+    );
+
     // Retrieve dead letters
     let dlq = client.get_dead_letters();
     assert_eq!(dlq.len(), 1, "DLQ should have 1 entry");
@@ -155,15 +163,16 @@ fn test_dead_letter_queue_end_to_end() {
     // Retry dead letter
     client.retry_dead_letter(&admin, &0);
 
+    // retry_dead_letter must emit a DLQ_RTY event
+    let ev = env.events().all();
+    assert!(
+        ev.events().len() > 0,
+        "retry_dead_letter must emit a DLQ_RTY event"
+    );
+
     // DLQ should be empty after successful retry
     let dlq_after = client.get_dead_letters();
     assert_eq!(dlq_after.len(), 0, "DLQ should be empty after retry");
-
-    let all_events = env.events().all();
-    assert!(
-        all_events.events().len() > 0,
-        "DLQ operations should emit events"
-    );
 }
 
 /// Test dead letter queue with multiple entries and retry specific index
@@ -191,9 +200,24 @@ fn test_dead_letter_queue_multiple_entries() {
     let subscriber2 = Address::generate(&env);
     let subscriber3 = Address::generate(&env);
 
-    client.push_dead_letter(&admin, &event_id1, &subscriber1, &String::from_str(&env, "reason1"));
-    client.push_dead_letter(&admin, &event_id2, &subscriber2, &String::from_str(&env, "reason2"));
-    client.push_dead_letter(&admin, &event_id3, &subscriber3, &String::from_str(&env, "reason3"));
+    client.push_dead_letter(
+        &admin,
+        &event_id1,
+        &subscriber1,
+        &String::from_str(&env, "reason1"),
+    );
+    client.push_dead_letter(
+        &admin,
+        &event_id2,
+        &subscriber2,
+        &String::from_str(&env, "reason2"),
+    );
+    client.push_dead_letter(
+        &admin,
+        &event_id3,
+        &subscriber3,
+        &String::from_str(&env, "reason3"),
+    );
 
     let dlq = client.get_dead_letters();
     assert_eq!(dlq.len(), 3);
@@ -261,7 +285,7 @@ fn test_cross_contract_unauthorized_publish_fails() {
     // Unregistered external contract tries to publish
     let unauthorized = Address::generate(&env);
     let payload = String::from_str(&env, "payload");
-    
+
     let result = client.try_publish_event(&unauthorized, &topic, &1, &payload);
     assert!(result.is_err(), "Unauthorized publish should fail");
 }
@@ -329,7 +353,12 @@ fn test_dead_letter_queue_retry_invalid_index() {
     let hash = String::from_str(&env, "sha256:test");
     client.register_schema(&admin, &topic, &1, &hash);
     let event_id = client.publish_event(&admin, &topic, &1, &String::from_str(&env, "p"));
-    client.push_dead_letter(&admin, &event_id, &Address::generate(&env), &String::from_str(&env, "r"));
+    client.push_dead_letter(
+        &admin,
+        &event_id,
+        &Address::generate(&env),
+        &String::from_str(&env, "r"),
+    );
 
     let result = client.try_retry_dead_letter(&admin, &999);
     assert!(result.is_err(), "Retrying with invalid index should fail");
