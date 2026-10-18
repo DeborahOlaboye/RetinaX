@@ -40,6 +40,7 @@ coverage/
 # Node (if using scripts)
 node_modules/
 package-lock.json
+!website/package-lock.json
 
 # Soroban
 .soroban/
