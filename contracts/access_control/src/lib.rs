@@ -70,6 +70,15 @@ impl AccessControlContract {
         whitelist::add_to_whitelist(&env, &caller, &user)
     }
 
+    /// Batch adds user addresses to the whitelist.
+    pub fn batch_add_to_whitelist(
+        env: Env,
+        caller: Address,
+        users: Vec<Address>,
+    ) -> Result<(), AccessControlError> {
+        whitelist::batch_add_to_whitelist(&env, &caller, &users)
+    }
+
     /// Removes a user address from the whitelist.
     pub fn remove_from_whitelist(
         env: Env,
@@ -77,6 +86,24 @@ impl AccessControlContract {
         user: Address,
     ) -> Result<(), AccessControlError> {
         whitelist::remove_from_whitelist(&env, &caller, &user)
+    }
+
+    /// Batch removes user addresses from the whitelist.
+    pub fn batch_remove_from_whitelist(
+        env: Env,
+        caller: Address,
+        users: Vec<Address>,
+    ) -> Result<(), AccessControlError> {
+        whitelist::batch_remove_from_whitelist(&env, &caller, &users)
+    }
+
+    /// Returns a paginated list of whitelisted addresses along with total count.
+    pub fn get_whitelisted_addresses(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> (Vec<Address>, u32) {
+        whitelist::get_whitelisted_addresses(&env, offset, limit)
     }
 
     /// Checks if a user is whitelisted (returns true if whitelist is disabled).

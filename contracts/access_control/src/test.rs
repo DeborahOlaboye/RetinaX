@@ -140,7 +140,50 @@ fn test_whitelist() {
     // Remove from whitelist
     client.remove_from_whitelist(&admin, &user);
     assert!(!client.check_whitelist(&user));
+
+    // Batch add to whitelist
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+
+    let mut batch = Vec::new(&env);
+    batch.push_back(user1.clone());
+    batch.push_back(user2.clone());
+    batch.push_back(user3.clone());
+
+    client.batch_add_to_whitelist(&admin, &batch);
+    assert!(client.is_whitelisted(&user1));
+    assert!(client.is_whitelisted(&user2));
+    assert!(client.is_whitelisted(&user3));
+
+    // Test pagination
+    let (page1, total1) = client.get_whitelisted_addresses(&0, &2);
+    assert_eq!(total1, 3);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap(), user1);
+    assert_eq!(page1.get(1).unwrap(), user2);
+
+    let (page2, total2) = client.get_whitelisted_addresses(&2, &2);
+    assert_eq!(total2, 3);
+    assert_eq!(page2.len(), 1);
+    assert_eq!(page2.get(0).unwrap(), user3);
+
+    // Batch remove
+    let mut remove_batch = Vec::new(&env);
+    remove_batch.push_back(user1.clone());
+    remove_batch.push_back(user3.clone());
+
+    client.batch_remove_from_whitelist(&admin, &remove_batch);
+    assert!(!client.is_whitelisted(&user1));
+    assert!(client.is_whitelisted(&user2));
+    assert!(!client.is_whitelisted(&user3));
+
+    let (page_rem, total_rem) = client.get_whitelisted_addresses(&0, &10);
+    assert_eq!(total_rem, 1);
+    assert_eq!(page_rem.len(), 1);
+    assert_eq!(page_rem.get(0).unwrap(), user2);
 }
+
 
 #[test]
 fn test_acl_groups() {
