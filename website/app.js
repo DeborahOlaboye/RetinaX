@@ -3,6 +3,7 @@
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', () => {
+  initPageTransitions();
   // 1. Initialize AOS (Animate On Scroll)
   if (typeof AOS !== 'undefined') {
     AOS.init({
@@ -25,6 +26,19 @@ document.addEventListener('DOMContentLoaded', () => {
   initDataFetchSimulator();
   initModal();
 });
+
+function initPageTransitions() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href]');
+    if (!link || link.target === '_blank' || link.origin !== window.location.origin) return;
+    const href = link.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('mailto:')) return;
+    event.preventDefault();
+    document.body.classList.add('page-transitioning');
+    window.setTimeout(() => { window.location.href = href; }, 180);
+  });
+}
 
 /* ==========================================================================
    GSAP Mega Animation Timelines
