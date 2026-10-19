@@ -126,6 +126,14 @@ body {
   background-color: var(--bg-page);
   min-height: 100vh;
   line-height: 1.6;
+  animation: page-enter 220ms ease-out both;
+}
+
+body.page-transitioning { opacity: 0; transition: opacity 180ms ease-in; }
+@keyframes page-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  body { animation: none; }
+  body.page-transitioning { opacity: 1; transition: none; }
 }
 
 .container {
