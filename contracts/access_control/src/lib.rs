@@ -178,6 +178,20 @@ impl AccessControlContract {
         permissions::revoke_custom_permission(&env, &caller, &user, permission)
     }
 
+    /// Sets the maximum delegation chain depth allowed.
+    pub fn set_max_delegation_depth(
+        env: Env,
+        caller: Address,
+        max_depth: u32,
+    ) -> Result<(), AccessControlError> {
+        permissions::set_max_delegation_depth(&env, &caller, max_depth)
+    }
+
+    /// Gets the maximum delegation chain depth allowed.
+    pub fn get_max_delegation_depth(env: Env) -> u32 {
+        permissions::get_max_delegation_depth(&env)
+    }
+
     /// Delegates a complete role to a delegatee.
     pub fn delegate_role(
         env: Env,

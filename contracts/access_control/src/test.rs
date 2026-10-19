@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use crate::{
-    AccessControlContract, AccessControlContractClient, CredentialType, Permission,
-    PolicyConditions, Role, SensitivityLevel, TimeRestriction,
+    AccessControlContract, AccessControlContractClient, AccessControlError, CredentialType,
+    Permission, PolicyConditions, Role, SensitivityLevel, TimeRestriction,
 };
 use soroban_sdk::{
     symbol_short,
@@ -109,7 +109,43 @@ fn test_delegation() {
     // Revoke scoped delegation
     client.revoke_scoped_delegation(&ophth, &assistant);
     assert!(!client.has_delegated_permission(&ophth, &assistant, &Permission::WriteRecord));
+
+    // Delegation chain depth tests (default limit: 3)
+    assert_eq!(client.get_max_delegation_depth(), 3);
+
+    let user_a = Address::generate(&env);
+    let user_b = Address::generate(&env);
+    let user_c = Address::generate(&env);
+    let user_d = Address::generate(&env);
+    let user_e = Address::generate(&env);
+
+    client.assign_role(&admin, &user_a, &Role::Ophthalmologist, &0);
+
+    // Depth 1: user_a -> user_b (Allowed)
+    let res1 = client.try_delegate_role(&user_a, &user_b, &Role::Ophthalmologist, &0);
+    assert!(res1.is_ok());
+
+    // Depth 2: user_b -> user_c (Allowed)
+    let res2 = client.try_delegate_role(&user_b, &user_c, &Role::Ophthalmologist, &0);
+    assert!(res2.is_ok());
+
+    // Depth 3: user_c -> user_d (Allowed, reaching default limit of 3)
+    let res3 = client.try_delegate_role(&user_c, &user_d, &Role::Ophthalmologist, &0);
+    assert!(res3.is_ok());
+
+    // Depth 4: user_d -> user_e (Exceeds limit of 3, must return DelegationDepthExceeded)
+    let res4 = client.try_delegate_role(&user_d, &user_e, &Role::Ophthalmologist, &0);
+    assert_eq!(res4, Err(Ok(AccessControlError::DelegationDepthExceeded)));
+
+    // Test configurable depth limit
+    client.set_max_delegation_depth(&admin, &4);
+    assert_eq!(client.get_max_delegation_depth(), 4);
+
+    // Now Depth 4 succeeds
+    let res4_retry = client.try_delegate_role(&user_d, &user_e, &Role::Ophthalmologist, &0);
+    assert!(res4_retry.is_ok());
 }
+
 
 #[test]
 fn test_whitelist() {
