@@ -9,13 +9,12 @@ extern crate std;
 
 use clinical_records::{
     ClinicalRecordsContract, ClinicalRecordsContractClient, ContractError, EyeExamination,
-    FundusPhotography, IntraocularPressure, LensType, OptFundusPhotography,
-    OptPhysicalMeasurement, OptRetinalImaging, OptVisualField, PhysicalMeasurement,
-    Prescription, PrescriptionData, RetinalImaging, SlitLampFindings, VisualAcuity,
-    VisualField,
+    FundusPhotography, IntraocularPressure, LensType, OptFundusPhotography, OptPhysicalMeasurement,
+    OptRetinalImaging, OptVisualField, PhysicalMeasurement, Prescription, PrescriptionData,
+    RetinalImaging, SlitLampFindings, VisualAcuity, VisualField,
 };
 use soroban_sdk::{
-    testutils::{Address as _, Ledger as _},
+    testutils::{Address as _, Events as _},
     Address, Env, String,
 };
 
@@ -109,7 +108,10 @@ fn test_initialization_lifecycle_and_admin_config() {
     assert!(init_res.is_ok());
 
     assert_eq!(client.get_admin(), admin);
-    assert_eq!(client.get_vision_records_contract(), Some(vision_records.clone()));
+    assert_eq!(
+        client.get_vision_records_contract(),
+        Some(vision_records.clone())
+    );
 
     // Duplicate initialization must return AlreadyInitialized
     let dup_init = client.try_initialize(&admin, &vision_records);
@@ -135,7 +137,10 @@ fn test_uninitialized_calls_rejected() {
     let contract_id = env.register(ClinicalRecordsContract, ());
     let client = ClinicalRecordsContractClient::new(&env, &contract_id);
 
-    assert_eq!(client.try_get_admin(), Err(Ok(ContractError::NotInitialized)));
+    assert_eq!(
+        client.try_get_admin(),
+        Err(Ok(ContractError::NotInitialized))
+    );
     assert_eq!(client.get_vision_records_contract(), None);
 
     let caller = Address::generate(&env);
@@ -271,12 +276,7 @@ fn test_prescription_two_phase_commit_lifecycle() {
     assert_eq!(client.get_prescription_count(), 0);
 
     // Phase 1: Prepare
-    let rx_id = client.prepare_add_prescription(
-        &vision_records,
-        &patient,
-        &provider,
-        &rx_data,
-    );
+    let rx_id = client.prepare_add_prescription(&vision_records, &patient, &provider, &rx_data);
     assert_eq!(rx_id, 1);
     assert_eq!(client.get_prescription_count(), 1);
 
@@ -306,15 +306,12 @@ fn test_prescription_double_commit_prevention() {
     let provider = Address::generate(&env);
     let rx_data = sample_prescription_data(&env);
 
-    let rx_id = client.prepare_add_prescription(
-        &vision_records,
-        &patient,
-        &provider,
-        &rx_data,
-    );
+    let rx_id = client.prepare_add_prescription(&vision_records, &patient, &provider, &rx_data);
 
     // First commit succeeds
-    assert!(client.try_commit_add_prescription(&vision_records, &rx_id).is_ok());
+    assert!(client
+        .try_commit_add_prescription(&vision_records, &rx_id)
+        .is_ok());
 
     // Second commit must fail with InvalidPhase
     let double_commit = client.try_commit_add_prescription(&vision_records, &rx_id);
@@ -328,12 +325,7 @@ fn test_prescription_rollback_lifecycle() {
     let provider = Address::generate(&env);
     let rx_data = sample_prescription_data(&env);
 
-    let rx_id = client.prepare_add_prescription(
-        &vision_records,
-        &patient,
-        &provider,
-        &rx_data,
-    );
+    let rx_id = client.prepare_add_prescription(&vision_records, &patient, &provider, &rx_data);
 
     // Rollback phase 1 preparation
     let rollback_res = client.try_rollback_add_prescription(&vision_records, &rx_id);
@@ -357,16 +349,13 @@ fn test_prescription_rollback_after_commit_does_not_destroy_committed_data() {
     let provider = Address::generate(&env);
     let rx_data = sample_prescription_data(&env);
 
-    let rx_id = client.prepare_add_prescription(
-        &vision_records,
-        &patient,
-        &provider,
-        &rx_data,
-    );
+    let rx_id = client.prepare_add_prescription(&vision_records, &patient, &provider, &rx_data);
     client.commit_add_prescription(&vision_records, &rx_id);
 
     // Calling rollback after commit cleans up or succeeds idempotently
-    assert!(client.try_rollback_add_prescription(&vision_records, &rx_id).is_ok());
+    assert!(client
+        .try_rollback_add_prescription(&vision_records, &rx_id)
+        .is_ok());
 
     // Committed prescription remains intact in persistent storage
     let fetched = client.get_prescription(&vision_records, &rx_id);
@@ -382,12 +371,7 @@ fn test_prescription_unauthorized_attempts() {
     let rx_data = sample_prescription_data(&env);
 
     assert_eq!(
-        client.try_prepare_add_prescription(
-            &unauthorized_caller,
-            &patient,
-            &provider,
-            &rx_data
-        ),
+        client.try_prepare_add_prescription(&unauthorized_caller, &patient, &provider, &rx_data),
         Err(Ok(ContractError::Unauthorized))
     );
 
@@ -422,11 +406,105 @@ fn test_input_validation_errors() {
         pd: String::from_str(&env, "60"),
     };
 
-    let res = client.try_prepare_add_prescription(
-        &vision_records,
-        &patient,
-        &provider,
-        &invalid_rx_data,
-    );
+    let res =
+        client.try_prepare_add_prescription(&vision_records, &patient, &provider, &invalid_rx_data);
     assert_eq!(res, Err(Ok(ContractError::InvalidInput)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Events Emission Tests (#268)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_events_emission_on_all_state_changing_operations() {
+    use clinical_records::events::{
+        EyeExaminationAddedEvent, PrescriptionCommittedEvent, PrescriptionPreparedEvent,
+        PrescriptionRolledBackEvent,
+    };
+    use soroban_sdk::xdr::ContractEventBody;
+    use soroban_sdk::{symbol_short, IntoVal, TryFromVal};
+
+    let (env, client, _admin, vision_records) = setup_clinical();
+    let patient = Address::generate(&env);
+    let provider = Address::generate(&env);
+
+    // 1. add_eye_examination emits EXAM_ADD event
+    let record_id = 42u64;
+    let notes = String::from_str(&env, "Event test exam");
+    client.add_eye_examination(
+        &vision_records,
+        &record_id,
+        &sample_visual_acuity_uncorrected_only(&env),
+        &sample_iop(&env),
+        &sample_slit_lamp(&env),
+        &OptVisualField::None,
+        &OptRetinalImaging::None,
+        &OptFundusPhotography::None,
+        &notes,
+    );
+
+    let binding1 = env.events().all();
+    let all_events = binding1.events();
+    assert_eq!(all_events.len(), 1);
+    let last_event = all_events.last().unwrap();
+    let ContractEventBody::V0(exam_body) = &last_event.body;
+    assert_eq!(
+        exam_body.topics.first().unwrap(),
+        &symbol_short!("EXAM_ADD").into_val(&env)
+    );
+    let exam_data = EyeExaminationAddedEvent::try_from_val(&env, &exam_body.data).unwrap();
+    assert_eq!(exam_data.record_id, record_id);
+    assert_eq!(exam_data.caller, vision_records);
+
+    // 2. prepare_add_prescription emits RX_PREP event
+    let rx_data = sample_prescription_data(&env);
+    let rx_id = client.prepare_add_prescription(&vision_records, &patient, &provider, &rx_data);
+    let binding2 = env.events().all();
+    let all_events = binding2.events();
+    assert_eq!(all_events.len(), 1);
+    let last_event = all_events.last().unwrap();
+    let ContractEventBody::V0(prep_body) = &last_event.body;
+    assert_eq!(
+        prep_body.topics.first().unwrap(),
+        &symbol_short!("RX_PREP").into_val(&env)
+    );
+    let prep_data = PrescriptionPreparedEvent::try_from_val(&env, &prep_body.data).unwrap();
+    assert_eq!(prep_data.rx_id, rx_id);
+    assert_eq!(prep_data.patient, patient);
+    assert_eq!(prep_data.provider, provider);
+
+    // 3. commit_add_prescription emits RX_CMT event
+    client.commit_add_prescription(&vision_records, &rx_id);
+    let binding3 = env.events().all();
+    let all_events = binding3.events();
+    assert_eq!(all_events.len(), 1);
+    let last_event = all_events.last().unwrap();
+    let ContractEventBody::V0(cmt_body) = &last_event.body;
+    assert_eq!(
+        cmt_body.topics.first().unwrap(),
+        &symbol_short!("RX_CMT").into_val(&env)
+    );
+    let cmt_data = PrescriptionCommittedEvent::try_from_val(&env, &cmt_body.data).unwrap();
+    assert_eq!(cmt_data.rx_id, rx_id);
+    assert_eq!(cmt_data.caller, vision_records);
+
+    // 4. prepare and rollback_add_prescription emits RX_RBK event
+    let rx_id_2 = client.prepare_add_prescription(&vision_records, &patient, &provider, &rx_data);
+    let binding4 = env.events().all();
+    let all_events = binding4.events();
+    assert_eq!(all_events.len(), 1);
+
+    client.rollback_add_prescription(&vision_records, &rx_id_2);
+    let binding5 = env.events().all();
+    let all_events = binding5.events();
+    assert_eq!(all_events.len(), 1);
+    let last_event = all_events.last().unwrap();
+    let ContractEventBody::V0(rbk_body) = &last_event.body;
+    assert_eq!(
+        rbk_body.topics.first().unwrap(),
+        &symbol_short!("RX_RBK").into_val(&env)
+    );
+    let rbk_data = PrescriptionRolledBackEvent::try_from_val(&env, &rbk_body.data).unwrap();
+    assert_eq!(rbk_data.rx_id, rx_id_2);
+    assert_eq!(rbk_data.caller, vision_records);
 }
