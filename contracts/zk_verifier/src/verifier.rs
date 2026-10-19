@@ -160,6 +160,72 @@ pub struct Proof {
     pub c: G1Point,
 }
 
+/// Canonical proof system identifiers supporting dual pre-quantum and post-quantum migration.
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ProofSystemId {
+    /// BN254 Groth16 zk-SNARK (vulnerable to Shor's algorithm on quantum computers).
+    Groth16Bn254 = 1,
+    /// BN254 PLONK universal SNARK (discrete log / pairing based, quantum vulnerable).
+    PlonkBn254 = 2,
+    /// Post-quantum hash-based STARK with transparent setup and FRI protocol (quantum resistant).
+    StarkFri = 3,
+    /// Post-quantum lattice-based zero-knowledge argument (quantum resistant under Learning With Errors).
+    LatticeZk = 4,
+}
+
+impl ProofSystemId {
+    /// Validates and parses raw proof system identifier.
+    ///
+    /// Rejects unknown, reserved, or invalid identifiers.
+    pub fn from_u32(val: u32) -> Result<Self, ProofValidationError> {
+        match val {
+            1 => Ok(ProofSystemId::Groth16Bn254),
+            2 => Ok(ProofSystemId::PlonkBn254),
+            3 => Ok(ProofSystemId::StarkFri),
+            4 => Ok(ProofSystemId::LatticeZk),
+            _ => Err(ProofValidationError::InvalidProofSystemId),
+        }
+    }
+
+    /// Returns true if this proof system possesses theoretical post-quantum security.
+    pub fn is_post_quantum(&self) -> bool {
+        matches!(self, ProofSystemId::StarkFri | ProofSystemId::LatticeZk)
+    }
+}
+
+/// Extensible proof representation designed for future post-quantum migration.
+///
+/// Encapsulates either classical curve commitments (Groth16, PLONK)
+/// or post-quantum hash-based STARK / lattice proof payloads.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExtensibleProof {
+    /// Pre-quantum Groth16 proof points over BN254 (256 bytes fixed).
+    Groth16(Proof),
+    /// Transparent post-quantum STARK proof payload containing execution trace roots and FRI queries.
+    Stark(BytesN<32>),
+    /// Post-quantum lattice-based polynomial commitment vector.
+    Lattice(BytesN<32>),
+}
+
+impl ExtensibleProof {
+    /// Returns the associated [`ProofSystemId`].
+    pub fn proof_system_id(&self) -> ProofSystemId {
+        match self {
+            ExtensibleProof::Groth16(_) => ProofSystemId::Groth16Bn254,
+            ExtensibleProof::Stark(_) => ProofSystemId::StarkFri,
+            ExtensibleProof::Lattice(_) => ProofSystemId::LatticeZk,
+        }
+    }
+
+    /// Verifies if this proof instance is post-quantum secure.
+    pub fn is_post_quantum(&self) -> bool {
+        self.proof_system_id().is_post_quantum()
+    }
+}
+
 /// Granular errors encountered during structural validation of proof components.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ProofValidationError {
@@ -177,6 +243,8 @@ pub enum ProofValidationError {
     EmptyPublicInputs,
     /// A public input element consists entirely of zero bytes.
     ZeroedPublicInput,
+    /// The proof system identifier is invalid, unsupported, or unrecognized.
+    InvalidProofSystemId,
 }
 
 const G2_POINT_LEN: usize = 128;
@@ -239,6 +307,7 @@ fn g2_to_bytes(point: &G2Point) -> [u8; 128] {
 ///
 /// Implements [`ZkVerifier`] to provide high-assurance proof validation and pairing
 /// verification in Soroban smart contracts.
+#[derive(Clone, Debug)]
 pub struct Bn254Verifier;
 
 impl ZkVerifier for Bn254Verifier {
@@ -356,6 +425,7 @@ impl ZkVerifier for Bn254Verifier {
 /// # Complexity Design
 /// - **Time Complexity**: $\mathcal{O}(N)$ field operations where $N = \text{len}(inputs)$.
 /// - **Space Complexity**: $\mathcal{O}(N)$ byte buffer allocation for converting Soroban vectors.
+#[derive(Clone, Debug)]
 pub struct PoseidonHasher;
 
 impl PoseidonHasher {
@@ -438,4 +508,3 @@ impl PoseidonHasher {
         }
     }
 }
-

@@ -197,4 +197,139 @@ mod tests {
         assert_eq!(state.count, 0);
         assert_eq!(state.window_start, 500);
     }
+
+    // ── Issue #265 Rate Limiting Tests ────────────────────────────────────────
+
+    #[test]
+    fn test_burst_requests_at_rate_limit_boundary() {
+        let cfg = RateLimiterConfig::new(5, 60);
+        let mut state = RateLimiterState::new(100);
+
+        // Burst 5 requests in the exact same second
+        for i in 1..=5 {
+            assert!(
+                state.record_hit(100, &cfg),
+                "Request {} of 5 must succeed within quota",
+                i
+            );
+            assert_eq!(state.count, i);
+        }
+
+        // Exactly at boundary: 6th request must be rejected
+        assert!(
+            !state.record_hit(100, &cfg),
+            "Request 6 exceeding limit of 5 must be rejected"
+        );
+        assert_eq!(state.count, 5, "Count must remain saturated at max limit");
+    }
+
+    #[test]
+    fn test_rate_limit_window_rollover() {
+        let cfg = RateLimiterConfig::new(3, 60);
+        let mut state = RateLimiterState::new(100);
+
+        // Consume all 3 requests at t=100
+        assert!(state.record_hit(100, &cfg));
+        assert!(state.record_hit(100, &cfg));
+        assert!(state.record_hit(100, &cfg));
+        assert!(!state.record_hit(100, &cfg));
+
+        // Just before window rollover at t=159: still rejected
+        assert!(!state.record_hit(159, &cfg));
+
+        // Exact rollover at t=160 (100 + 60): resets window and allows request
+        assert!(
+            state.record_hit(160, &cfg),
+            "Request at exact rollover boundary must succeed"
+        );
+        assert_eq!(state.window_start, 160);
+        assert_eq!(state.count, 1);
+
+        // Next 2 requests in new window succeed
+        assert!(state.record_hit(160, &cfg));
+        assert!(state.record_hit(160, &cfg));
+        // 4th request in new window rejected
+        assert!(!state.record_hit(160, &cfg));
+    }
+
+    #[test]
+    fn test_multiple_users_with_independent_rate_limits() {
+        let cfg = RateLimiterConfig::new(2, 60);
+        let mut user_a = RateLimiterState::new(100);
+        let mut user_b = RateLimiterState::new(100);
+        let mut user_c = RateLimiterState::new(100);
+
+        // User A exhausts quota
+        assert!(user_a.record_hit(100, &cfg));
+        assert!(user_a.record_hit(100, &cfg));
+        assert!(!user_a.record_hit(100, &cfg));
+
+        // User B and User C are completely independent
+        assert!(user_b.record_hit(100, &cfg));
+        assert_eq!(user_b.count, 1);
+        assert_eq!(user_a.count, 2);
+
+        assert!(user_c.record_hit(100, &cfg));
+        assert!(user_c.record_hit(100, &cfg));
+        assert!(!user_c.record_hit(100, &cfg));
+
+        // User B still has 1 request left
+        assert!(user_b.record_hit(100, &cfg));
+        assert!(!user_b.record_hit(100, &cfg));
+    }
+
+    #[test]
+    fn test_rate_limit_config_changes_during_active_window() {
+        let cfg_initial = RateLimiterConfig::new(5, 60);
+        let mut state = RateLimiterState::new(10);
+
+        // Send 3 requests under initial config
+        assert!(state.record_hit(10, &cfg_initial));
+        assert!(state.record_hit(10, &cfg_initial));
+        assert!(state.record_hit(10, &cfg_initial));
+        assert_eq!(state.count, 3);
+        assert_eq!(state.window_start, 10);
+
+        // Reconfigure to lower limit (3) during active window
+        let cfg_lowered = RateLimiterConfig::new(3, 60);
+        // Next request at t=20 is rejected because count (3) >= new limit (3)
+        assert!(!state.record_hit(20, &cfg_lowered));
+        // Crucial: window was NOT reset by the config change
+        assert_eq!(state.window_start, 10);
+        assert_eq!(state.count, 3);
+
+        // Reconfigure to higher limit (10) during active window
+        let cfg_raised = RateLimiterConfig::new(10, 60);
+        // Next request at t=20 is allowed because 3 < 10
+        assert!(state.record_hit(20, &cfg_raised));
+        assert_eq!(state.count, 4);
+        assert_eq!(state.window_start, 10, "Existing window must not be reset");
+    }
+
+    #[test]
+    fn test_rate_limit_with_timestamp_manipulation() {
+        let cfg = RateLimiterConfig::new(3, 60);
+        let mut state = RateLimiterState::new(100);
+
+        assert!(state.record_hit(100, &cfg)); // count = 1, window_start = 100
+
+        // Attempt timestamp rollback (clock skew / manipulation attempt)
+        // Timestamp is backwards (now = 80 < window_start = 100)
+        // 80 >= 100 + 60 is false, so it does not falsely rollover the window.
+        assert!(state.record_hit(80, &cfg));
+        assert_eq!(state.count, 2);
+        assert_eq!(state.window_start, 100);
+
+        assert!(state.record_hit(90, &cfg)); // count = 3
+        // Saturated at limit 3; subsequent attempt rejected
+        assert!(!state.record_hit(95, &cfg));
+        assert_eq!(state.count, 3);
+
+        // Valid forward rollover occurs only when timestamp >= 160
+        assert!(!state.record_hit(159, &cfg));
+        assert!(state.record_hit(160, &cfg));
+        assert_eq!(state.window_start, 160);
+        assert_eq!(state.count, 1);
+    }
 }
+

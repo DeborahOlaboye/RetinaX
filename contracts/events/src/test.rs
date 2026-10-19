@@ -906,3 +906,72 @@ fn test_consumer_group_offset_consistency_under_rapid_publishes() {
     client.ack_event(&m1, &gid, &last);
     client.ack_event(&m2, &gid, &last);
 }
+
+// ── Replay-attack prevention tests (issue #262) ────────────────────────────
+//
+// The log itself is append-only: publishing the same payload twice yields two
+// distinct event IDs (no silent dedup). Replay protection comes from monotonic
+// IDs + Lamport ordering + checkpoints — a redelivered (replayed) event is
+// detectable because its ID is already below the consumer's checkpoint/offset.
+
+#[test]
+fn test_duplicate_payload_gets_distinct_ids_and_ordered_replay() {
+    let (env, client, admin) = setup();
+    register_schema(&env, &client, &admin, "records.vision.create", 1);
+
+    // Submit the "same event" twice: both are accepted but distinguishable.
+    let id1 = publish_test_event(&env, &client, &admin, "records.vision.create", 1, "same_payload");
+    let id2 = publish_test_event(&env, &client, &admin, "records.vision.create", 1, "same_payload");
+    assert_ne!(id1, id2);
+    assert_eq!(client.get_event_count(), 2);
+
+    // Replay preserves strict ordering so a consumer can spot the duplicate.
+    let events = client.replay_events(&1, &10);
+    assert_eq!(events.len(), 2);
+    assert!(events.get(0).unwrap().event_id < events.get(1).unwrap().event_id);
+    assert!(
+        events.get(0).unwrap().lamport_ts < events.get(1).unwrap().lamport_ts
+    );
+}
+
+#[test]
+fn test_replay_from_checkpoint_ignores_already_seen_events() {
+    let (env, client, admin) = setup();
+    register_schema(&env, &client, &admin, "records.vision.create", 1);
+
+    publish_test_event(&env, &client, &admin, "records.vision.create", 1, "p1");
+    publish_test_event(&env, &client, &admin, "records.vision.create", 1, "p2");
+    let chkpt = client.create_checkpoint(&admin);
+    let seen_through = client.get_checkpoint(&chkpt);
+
+    // A replayed/redelivered copy of an already-seen event (id <= checkpoint)
+    // must not be reprocessed: replay from checkpoint+1 skips it.
+    publish_test_event(&env, &client, &admin, "records.vision.create", 1, "p3");
+    let fresh = client.replay_events(&(seen_through + 1), &10);
+    assert_eq!(fresh.len(), 1);
+    assert_eq!(fresh.get(0).unwrap().event_id, seen_through + 1);
+}
+
+#[test]
+fn test_out_of_order_replay_requests_are_safe() {
+    let (env, client, admin) = setup();
+    register_schema(&env, &client, &admin, "records.vision.create", 1);
+
+    publish_test_event(&env, &client, &admin, "records.vision.create", 1, "p1");
+    publish_test_event(&env, &client, &admin, "records.vision.create", 1, "p2");
+
+    // Future IDs and unknown topics return empty (no panic, no gaps filled).
+    let future = client.replay_events(&999, &10);
+    assert_eq!(future.len(), 0);
+    let unknown = String::from_str(&env, "unknown.topic");
+    let empty = client.replay_topic_events(&unknown, &1, &10);
+    assert_eq!(empty.len(), 0);
+
+    // Topic-scoped replay stays ordered even with interleaved topics.
+    register_schema(&env, &client, &admin, "staking.staked", 1);
+    publish_test_event(&env, &client, &admin, "staking.staked", 1, "s1");
+    let topic = String::from_str(&env, "records.vision.create");
+    let events = client.replay_topic_events(&topic, &1, &10);
+    assert_eq!(events.len(), 2);
+    assert!(events.get(0).unwrap().event_id < events.get(1).unwrap().event_id);
+}

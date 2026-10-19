@@ -1,4 +1,3 @@
-
 /// Validate that a string's length is within the inclusive range [min, max].
 pub fn validate_string_length(s: &String, min: u32, max: u32) -> Result<(), ContractError> {
     let len = s.len();
@@ -18,6 +17,8 @@ const MAX_NAME_LEN: u32 = 64;
 
 const MIN_HASH_LEN: u32 = 32;
 const MAX_HASH_LEN: u32 = 64;
+const MAX_INSURANCE_HASH_LEN: u32 = 128;
+const MAX_EMERGENCY_ATTESTATION_LEN: u32 = 512;
 
 const MIN_DURATION_SECONDS: u64 = 3600; // 1 hour
 const MAX_DURATION_SECONDS: u64 = 157_680_000; // 5 years
@@ -85,13 +86,68 @@ pub fn validate_data_hash(hash: &String) -> Result<(), ContractError> {
 /// Validate a grant access duration.
 /// Prevent extremely short durations (e.g., 0) or extremely long ones (overflow risk).
 pub fn validate_duration(duration_seconds: u64) -> Result<(), ContractError> {
-    if !(MIN_DURATION_SECONDS..=MAX_DURATION_SECONDS).contains(&duration_seconds) {
+    if duration_seconds == 0 || duration_seconds > MAX_DURATION_SECONDS {
         return Err(ContractError::InvalidInput);
     }
     Ok(())
 }
 
-pub fn validate_prescription_data(_data: &PrescriptionData) {}
+pub fn validate_insurance_hash(hash: &String) -> Result<(), ContractError> {
+    validate_string_length(hash, 1, MAX_INSURANCE_HASH_LEN)
+}
+
+pub fn validate_emergency_attestation(attestation: &String) -> Result<(), ContractError> {
+    validate_string_length(attestation, 1, MAX_EMERGENCY_ATTESTATION_LEN)
+        .map_err(|_| ContractError::InvalidAttestation)
+}
+
+pub fn validate_emergency_duration(duration_seconds: u64) -> Result<(), ContractError> {
+    if duration_seconds == 0 || duration_seconds > 86_400 {
+        return Err(ContractError::InvalidInput);
+    }
+    Ok(())
+}
+
+pub const MIN_CONSENT_ID_LEN: u32 = 1;
+pub const MAX_CONSENT_ID_LEN: u32 = 64;
+pub const MIN_CONSENT_STRING_LEN: u32 = 1;
+pub const MAX_CONSENT_STRING_LEN: u32 = 128;
+
+/// Validate a consent string's length and ensure it contains only printable ASCII characters.
+pub fn validate_consent_string(s: &String, min: u32, max: u32) -> Result<(), ContractError> {
+    validate_string_length(s, min, max)?;
+    let len = s.len();
+    let mut buf = [0u8; 128];
+    let slice_len = (len as usize).min(128);
+    s.copy_into_slice(&mut buf[..slice_len]);
+
+    let mut is_valid = true;
+    for &b in &buf[..slice_len] {
+        if !(32..=126).contains(&b) {
+            is_valid = false;
+            break;
+        }
+    }
+
+    if !is_valid {
+        return Err(ContractError::InvalidInput);
+    }
+    Ok(())
+}
+
+/// Validate consent identifier format and length.
+pub fn validate_consent_id(id: &String) -> Result<(), ContractError> {
+    validate_consent_string(id, MIN_CONSENT_ID_LEN, MAX_CONSENT_ID_LEN)
+}
+
+pub fn validate_prescription_data(data: &PrescriptionData) -> Result<(), ContractError> {
+    validate_string_length(&data.sphere, 1, 16)?;
+    validate_string_length(&data.cylinder, 1, 16)?;
+    validate_string_length(&data.axis, 1, 16)?;
+    validate_string_length(&data.add, 1, 16)?;
+    validate_string_length(&data.pd, 1, 16)?;
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -190,6 +246,41 @@ mod tests {
         assert_eq!(
             validate_duration(157_680_001),
             Err(ContractError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn test_validate_consent_string_and_id() {
+        let env = Env::default();
+
+        // Valid consent ID
+        assert_eq!(
+            validate_consent_id(&String::from_str(&env, "cst-001")),
+            Ok(())
+        );
+        assert_eq!(
+            validate_consent_id(&String::from_str(&env, "a")),
+            Ok(())
+        );
+
+        // Too long consent ID (> 64)
+        let long_id = "c".repeat(65);
+        assert_eq!(
+            validate_consent_id(&String::from_str(&env, &long_id)),
+            Err(ContractError::InvalidInput)
+        );
+
+        // Control characters in consent string
+        let invalid_cst = String::from_str(&env, "cst\n001");
+        assert_eq!(
+            validate_consent_id(&invalid_cst),
+            Err(ContractError::InvalidInput)
+        );
+
+        // Valid custom bounds
+        assert_eq!(
+            validate_consent_string(&String::from_str(&env, "treatment_sharing"), 1, 128),
+            Ok(())
         );
     }
 }

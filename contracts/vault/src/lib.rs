@@ -11,7 +11,7 @@ pub mod sss;
 #[cfg(test)]
 mod test;
 
-use common::{VaultPolicy, VaultRecord, VaultShare};
+pub use common::{VaultPolicy, VaultRecord, VaultShare};
 use identity::IdentityContractClient;
 use key_rotation::RotationEvent;
 use soroban_sdk::{

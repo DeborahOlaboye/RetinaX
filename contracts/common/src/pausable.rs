@@ -81,4 +81,41 @@ mod tests {
             assert!(require_not_paused(&env).is_ok());
         });
     }
+
+    #[test]
+    fn double_pause_and_double_resume_are_idempotent() {
+        let env = Env::default();
+        let contract_id = env.register(DummyContract, ());
+        env.as_contract(&contract_id, || {
+            use soroban_sdk::testutils::Address as _;
+            let caller = Address::generate(&env);
+            // Double-pause stays paused and keeps blocking.
+            pause(&env, &caller);
+            pause(&env, &caller);
+            assert!(is_paused(&env));
+            assert_eq!(require_not_paused(&env), Err(CommonError::Paused));
+
+            // Double-resume stays unpaused and keeps allowing.
+            unpause(&env, &caller);
+            unpause(&env, &caller);
+            assert!(!is_paused(&env));
+            assert!(require_not_paused(&env).is_ok());
+        });
+    }
+
+    #[test]
+    fn pause_blocks_mutating_guard_but_views_stay_open() {
+        let env = Env::default();
+        let contract_id = env.register(DummyContract, ());
+        env.as_contract(&contract_id, || {
+            use soroban_sdk::testutils::Address as _;
+            let caller = Address::generate(&env);
+            pause(&env, &caller);
+            // Mutating entry points must call require_not_paused and fail.
+            assert_eq!(require_not_paused(&env), Err(CommonError::Paused));
+            // Recovery: unpause clears the breaker.
+            unpause(&env, &caller);
+            assert!(require_not_paused(&env).is_ok());
+        });
+    }
 }
