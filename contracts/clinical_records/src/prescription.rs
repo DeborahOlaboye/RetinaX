@@ -1,7 +1,11 @@
-use crate::admin::require_authorized_vision_records;
+use crate::admin::{
+    check_permission, get_access_control_contract, require_authorized_vision_records,
+    require_initialized,
+};
 use crate::errors::ContractError;
 use crate::examination::validate_string;
 use crate::types::{LensType, OptionalContactLensData, Prescription, PrescriptionData};
+use access_control::Permission;
 use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
 
 pub const PRESCRIPTION_KEY: Symbol = symbol_short!("RX");
@@ -23,7 +27,16 @@ pub fn prepare_add_prescription(
     provider: Address,
     prescription_data: PrescriptionData,
 ) -> Result<u64, ContractError> {
-    require_authorized_vision_records(env, &caller)?;
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        if !check_permission(env, &caller, Permission::WriteRecord)? {
+            return Err(ContractError::Unauthorized);
+        }
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+    }
+
     validate_prescription_data(&prescription_data)?;
     let next_id = env
         .storage()
@@ -43,7 +56,16 @@ pub fn commit_add_prescription(
     caller: Address,
     rx_id: u64,
 ) -> Result<(), ContractError> {
-    require_authorized_vision_records(env, &caller)?;
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        if !check_permission(env, &caller, Permission::WriteRecord)? {
+            return Err(ContractError::Unauthorized);
+        }
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+    }
+
     let prep_key = (symbol_short!("P_ADD_RX"), rx_id);
     let prepared: (Address, Address, PrescriptionData, u64) = env
         .storage()
@@ -75,7 +97,16 @@ pub fn rollback_add_prescription(
     caller: Address,
     rx_id: u64,
 ) -> Result<(), ContractError> {
-    require_authorized_vision_records(env, &caller)?;
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        if !check_permission(env, &caller, Permission::WriteRecord)? {
+            return Err(ContractError::Unauthorized);
+        }
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+    }
+
     env.storage().temporary().remove(&(symbol_short!("P_ADD_RX"), rx_id));
     Ok(())
 }
@@ -85,9 +116,27 @@ pub fn get_prescription_count(env: &Env) -> u64 {
 }
 
 pub fn get_prescription(env: &Env, caller: Address, id: u64) -> Result<Prescription, ContractError> {
-    require_authorized_vision_records(env, &caller)?;
-    env.storage()
-        .persistent()
-        .get(&(PRESCRIPTION_KEY, id))
-        .ok_or(ContractError::RecordNotFound)
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        let is_reader = check_permission(env, &caller, Permission::ReadAnyRecord)?;
+        let rx: Prescription = env
+            .storage()
+            .persistent()
+            .get(&(PRESCRIPTION_KEY, id))
+            .ok_or(ContractError::RecordNotFound)?;
+
+        let is_patient = rx.patient == caller;
+        if !is_reader && !is_patient {
+            return Err(ContractError::Unauthorized);
+        }
+
+        Ok(rx)
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+        env.storage()
+            .persistent()
+            .get(&(PRESCRIPTION_KEY, id))
+            .ok_or(ContractError::RecordNotFound)
+    }
 }

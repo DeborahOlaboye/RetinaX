@@ -19,8 +19,13 @@ pub struct ClinicalRecordsContract;
 
 #[contractimpl]
 impl ClinicalRecordsContract {
-    pub fn initialize(env: Env, admin: Address, vision_records: Address) -> Result<(), ContractError> {
-        admin::initialize(&env, admin, vision_records)
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        vision_records: Address,
+        access_control: Option<Address>,
+    ) -> Result<(), ContractError> {
+        admin::initialize(&env, admin, vision_records, access_control)
     }
 
     pub fn get_admin(env: Env) -> Result<Address, ContractError> {
@@ -37,6 +42,18 @@ impl ClinicalRecordsContract {
 
     pub fn get_vision_records_contract(env: Env) -> Option<Address> {
         admin::get_vision_records_contract(&env)
+    }
+
+    pub fn set_access_control_contract(
+        env: Env,
+        admin: Address,
+        access_control: Address,
+    ) -> Result<(), ContractError> {
+        admin::set_access_control_contract(&env, admin, access_control)
+    }
+
+    pub fn get_access_control_contract(env: Env) -> Option<Address> {
+        admin::get_access_control_contract(&env)
     }
 
     pub fn add_eye_examination(
@@ -63,6 +80,15 @@ impl ClinicalRecordsContract {
             fundus_photo,
             clinical_notes,
         )
+    }
+
+    pub fn set_examination_patient(
+        env: Env,
+        caller: Address,
+        record_id: u64,
+        patient: Address,
+    ) -> Result<(), ContractError> {
+        examination::set_examination_patient(&env, caller, record_id, patient)
     }
 
     pub fn get_eye_examination(

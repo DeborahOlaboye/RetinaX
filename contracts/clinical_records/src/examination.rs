@@ -1,12 +1,17 @@
-use crate::admin::require_authorized_vision_records;
+use crate::admin::{
+    check_permission, get_access_control_contract, require_authorized_vision_records,
+    require_initialized,
+};
 use crate::errors::ContractError;
 use crate::types::{
     EyeExamination, IntraocularPressure, OptFundusPhotography, OptPhysicalMeasurement,
     OptRetinalImaging, OptVisualField, PhysicalMeasurement, SlitLampFindings, VisualAcuity,
 };
+use access_control::Permission;
 use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
 
 pub const EXAM_KEY: Symbol = symbol_short!("EXAM");
+pub const EXAM_PATIENT_KEY: Symbol = symbol_short!("EX_PAT");
 
 pub fn validate_string(value: &String, min_len: u32, max_len: u32) -> Result<(), ContractError> {
     let len = value.len();
@@ -104,7 +109,16 @@ pub fn add_eye_examination(
     fundus_photo: OptFundusPhotography,
     clinical_notes: String,
 ) -> Result<(), ContractError> {
-    require_authorized_vision_records(env, &caller)?;
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        if !check_permission(env, &caller, Permission::WriteRecord)? {
+            return Err(ContractError::Unauthorized);
+        }
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+    }
+
     validate_examination_strings(
         &visual_acuity,
         &iop,
@@ -130,14 +144,57 @@ pub fn add_eye_examination(
     Ok(())
 }
 
+pub fn set_examination_patient(
+    env: &Env,
+    caller: Address,
+    record_id: u64,
+    patient: Address,
+) -> Result<(), ContractError> {
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        if !check_permission(env, &caller, Permission::WriteRecord)? {
+            return Err(ContractError::Unauthorized);
+        }
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+    }
+
+    env.storage()
+        .persistent()
+        .set(&(EXAM_PATIENT_KEY, record_id), &patient);
+    Ok(())
+}
+
 pub fn get_eye_examination(
     env: &Env,
     caller: Address,
     record_id: u64,
 ) -> Result<EyeExamination, ContractError> {
-    require_authorized_vision_records(env, &caller)?;
-    env.storage()
-        .persistent()
-        .get(&(EXAM_KEY, record_id))
-        .ok_or(ContractError::RecordNotFound)
+    require_initialized(env)?;
+
+    if get_access_control_contract(env).is_some() {
+        let is_reader = check_permission(env, &caller, Permission::ReadAnyRecord)?;
+        let is_patient = env
+            .storage()
+            .persistent()
+            .get::<_, Address>(&(EXAM_PATIENT_KEY, record_id))
+            .map(|p| p == caller)
+            .unwrap_or(false);
+
+        if !is_reader && !is_patient {
+            return Err(ContractError::Unauthorized);
+        }
+
+        env.storage()
+            .persistent()
+            .get(&(EXAM_KEY, record_id))
+            .ok_or(ContractError::RecordNotFound)
+    } else {
+        require_authorized_vision_records(env, &caller)?;
+        env.storage()
+            .persistent()
+            .get(&(EXAM_KEY, record_id))
+            .ok_or(ContractError::RecordNotFound)
+    }
 }
