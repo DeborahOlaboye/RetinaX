@@ -140,7 +140,10 @@ pub fn add_eye_examination(
         clinical_notes,
     };
 
-    env.storage().persistent().set(&(EXAM_KEY, record_id), &exam);
+    env.storage()
+        .persistent()
+        .set(&(EXAM_KEY, record_id), &exam);
+    crate::events::publish_eye_examination_added(env, record_id, caller);
     Ok(())
 }
 

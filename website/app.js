@@ -2,16 +2,17 @@
    RetinaX — Clinical Interactive JS & GSAP + AOS Mega Animations
    ========================================================================== */
 
-if (typeof document !== 'undefined') {
-  document.addEventListener('DOMContentLoaded', () => {
-    // 0. Bootstrap ContractRegistry from runtime window config if available
-    if (typeof window !== 'undefined') {
-      if (window.RETINAX_CONTRACTS) {
-        ContractRegistry.loadFromConfig(window.RETINAX_CONTRACTS);
-      } else if (window.RETINAX_CONFIG && window.RETINAX_CONFIG.contracts) {
-        ContractRegistry.loadFromConfig(window.RETINAX_CONFIG.contracts);
-      }
-    }
+document.addEventListener('DOMContentLoaded', () => {
+  initPageTransitions();
+  // 1. Initialize AOS (Animate On Scroll)
+  if (typeof AOS !== 'undefined') {
+    AOS.init({
+      duration: 800,
+      easing: 'ease-out-cubic',
+      once: true,
+      offset: 100
+    });
+  }
 
     // 1. Initialize AOS (Animate On Scroll)
     if (typeof AOS !== 'undefined') {
@@ -37,6 +38,19 @@ if (typeof document !== 'undefined') {
   const year = document.getElementById('copyright-year');
   if (year) year.textContent = String(new Date().getFullYear());
 });
+
+function initPageTransitions() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href]');
+    if (!link || link.target === '_blank' || link.origin !== window.location.origin) return;
+    const href = link.getAttribute('href');
+    if (!href || href.startsWith('#') || href.startsWith('mailto:')) return;
+    event.preventDefault();
+    document.body.classList.add('page-transitioning');
+    window.setTimeout(() => { window.location.href = href; }, 180);
+  });
+}
 
 /* ==========================================================================
    Theme preference

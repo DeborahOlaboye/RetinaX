@@ -46,8 +46,14 @@ pub fn prepare_add_prescription(
         .saturating_add(1u64);
     env.storage().instance().set(&RX_COUNTER, &next_id);
     let prep_key = (symbol_short!("P_ADD_RX"), next_id);
-    let prep = (patient, provider, prescription_data, env.ledger().timestamp());
+    let prep = (
+        patient.clone(),
+        provider.clone(),
+        prescription_data,
+        env.ledger().timestamp(),
+    );
     env.storage().temporary().set(&prep_key, &prep);
+    crate::events::publish_prescription_prepared(env, next_id, patient, provider);
     Ok(next_id)
 }
 
@@ -87,8 +93,11 @@ pub fn commit_add_prescription(
         metadata_hash: String::from_str(env, ""),
     };
 
-    env.storage().persistent().set(&(PRESCRIPTION_KEY, rx_id), &prescription);
+    env.storage()
+        .persistent()
+        .set(&(PRESCRIPTION_KEY, rx_id), &prescription);
     env.storage().temporary().remove(&prep_key);
+    crate::events::publish_prescription_committed(env, rx_id, caller);
     Ok(())
 }
 
@@ -108,6 +117,11 @@ pub fn rollback_add_prescription(
     }
 
     env.storage().temporary().remove(&(symbol_short!("P_ADD_RX"), rx_id));
+    require_authorized_vision_records(env, &caller)?;
+    env.storage()
+        .temporary()
+        .remove(&(symbol_short!("P_ADD_RX"), rx_id));
+    crate::events::publish_prescription_rolled_back(env, rx_id, caller);
     Ok(())
 }
 
@@ -139,4 +153,14 @@ pub fn get_prescription(env: &Env, caller: Address, id: u64) -> Result<Prescript
             .get(&(PRESCRIPTION_KEY, id))
             .ok_or(ContractError::RecordNotFound)
     }
+pub fn get_prescription(
+    env: &Env,
+    caller: Address,
+    id: u64,
+) -> Result<Prescription, ContractError> {
+    require_authorized_vision_records(env, &caller)?;
+    env.storage()
+        .persistent()
+        .get(&(PRESCRIPTION_KEY, id))
+        .ok_or(ContractError::RecordNotFound)
 }

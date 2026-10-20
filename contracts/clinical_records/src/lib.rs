@@ -1,7 +1,9 @@
 #![no_std]
+#![allow(clippy::too_many_arguments, clippy::large_enum_variant)]
 
 pub mod admin;
 pub mod errors;
+pub mod events;
 pub mod examination;
 pub mod prescription;
 pub mod types;
@@ -26,6 +28,8 @@ impl ClinicalRecordsContract {
         access_control: Option<Address>,
     ) -> Result<(), ContractError> {
         admin::initialize(&env, admin, vision_records, access_control)
+    ) -> Result<(), ContractError> {
+        admin::initialize(&env, admin, vision_records)
     }
 
     pub fn get_admin(env: Env) -> Result<Address, ContractError> {
@@ -129,7 +133,11 @@ impl ClinicalRecordsContract {
         prescription::get_prescription_count(&env)
     }
 
-    pub fn get_prescription(env: Env, caller: Address, id: u64) -> Result<Prescription, ContractError> {
+    pub fn get_prescription(
+        env: Env,
+        caller: Address,
+        id: u64,
+    ) -> Result<Prescription, ContractError> {
         prescription::get_prescription(&env, caller, id)
     }
 }
